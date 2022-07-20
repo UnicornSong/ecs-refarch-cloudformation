@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  SubnetID:
+    Type: String
+    Default: subnet-0f413df83ef060adc
+  ImageUrl:
+    Type: String
+    Default: 526020827661.dkr.ecr.ap-southeast-2.amazonaws.com/ecs-test-app-private
+    Description: The url of a docker image that contains the application process that will handle the traffic for this service  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: >
+      Optional - Specifies the ID of an existing VPC in which to launch
+      your container instances. If you specify a VPC ID, you must specify a list of
+      existing subnets in that VPC. If you do not specify a VPC ID, a new VPC is created
+      with atleast 1 subnet.
+  EC2Instance:
+    Type: String
+    Default: "i-0fab8e042ad6ba261"
+    Description: The EC2 instance
+  ContainerPort:
+    Type: Number
+    Default: 5000
+    Description: What port number the application inside the docker container is binding to 
+
+  HostHeader:
+    Type: String
+    Default: "web2.dev.ecs.cucumbersoftware.com"
+    Description: A host header on the public load balancer that this service
+                 should be connected to. Use * to send all load balancer
+                 traffic to this service.
+  ListenerArn:
+    Type: String
+    Default: "arn:aws:elasticloadbalancing:ap-southeast-2:526020827661:listener/app/dev-ecs-lb/23a3eaf28bdebd16/7cfbf085e46c5066"
+    Description: The Arn of the LB Listener 
+  Priority:
+    Type: Number
+    Default: 51
+    Description: The priority for the routing rule added to the load balancer.
+                 This only applies if your have multiple services which have been
+                 assigned to different paths on the load balancer.                            
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: deployment-example-cluster
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: deployment-example-log-group
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: deployment-example-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ContainerSecurityGroup
+      GroupDescription: Security group for ECS TEST container
+      VpcId: !Ref 'VpcId'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0    
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          CidrIp: 0.0.0.0/0  
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: deployment-example-task
+      Cpu: 256
+      Memory: 512
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Ref ExecutionRole
+      ContainerDefinitions:
+        - Name: deployment-example-container
+          Image: !Ref 'ImageUrl'
+          PortMappings:
+            - ContainerPort: !Ref 'ContainerPort'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: ecs
+      RequiresCompatibilities:
+        - EC2
+        - FARGATE
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: TaskDefinition
+    Properties:
+      ServiceName: deployment-example-service
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref SubnetID
+          SecurityGroups:
+            - !GetAtt ContainerSecurityGroup.GroupId
