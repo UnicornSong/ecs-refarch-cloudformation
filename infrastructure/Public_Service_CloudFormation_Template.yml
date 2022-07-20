@@ -14,8 +14,7 @@ Parameters:
   ImageUrl:
     Type: String
     Default: 526020827661.dkr.ecr.ap-southeast-2.amazonaws.com/ecs-test-app-private
-    Description: The url of a docker image that contains the application process that
-                 will handle the traffic for this service
+    Description: The url of a docker image that contains the application process that will handle the traffic for this service
   ContainerPort:
     Type: Number
     Default: 5000
@@ -38,7 +37,7 @@ Parameters:
                  traffic to this service.
   Priority:
     Type: Number
-    Default: 5
+    Default: 51
     Description: The priority for the routing rule added to the load balancer.
                  This only applies if your have multiple services which have been
                  assigned to different paths on the load balancer.
@@ -46,20 +45,33 @@ Parameters:
     Type: Number
     Default: 1
     Description: How many copies of the service task to run
+  
   Role:
     Type: String
-    Default: ""
-    Description: (Optional) An IAM role to give the service's containers if the code within needs to
-                 access other AWS resources like S3 buckets, DynamoDB tables, etc
+    Default: "arn:aws:iam::526020827661:role/ecsServiceRole"
+    Description: (Optional) An IAM role to give the service's containers if the code within needs to access other AWS resources like S3 buckets, DynamoDB tables, etc
   VpcId:
-    Type: String
-    Default: "vpc-05fced7589bf798be"
+    Type: AWS::EC2::VPC::Id
     Description: The identifier of the VPC to use
     
   ListenerArn:
     Type: String
     Default: "arn:aws:elasticloadbalancing:ap-southeast-2:526020827661:listener/app/dev-ecs-lb/23a3eaf28bdebd16/7cfbf085e46c5066"
     Description: The Arn of the LB Listener 
+    
+  LoadBalancer:
+    Type: String
+    Default: "dev-ecs-lb"
+    Description: The target Load Balancer
+    
+  EC2Instance:
+    Type: String
+    Default: "i-0fab8e042ad6ba261"
+    Description: The EC2 instance
+    
+ # ASG:
+    #Type: AWS::AutoScaling::AutoScalingGroup::Id
+    #Description: Auto Scaling Group
     
 Conditions:
   HasCustomRole: !Not [ !Equals [!Ref 'Role', ''] ]
@@ -84,8 +96,17 @@ Resources:
           Cpu: !Ref 'ContainerCpu'
           Memory: !Ref 'ContainerMemory'
           Image: !Ref 'ImageUrl'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+                awslogs-group: !Join ['', ['/ecs/', !Ref AWS::StackName]]
+                awslogs-region: !Ref AWS::Region
+                awslogs-stream-prefix: ecs
+                awslogs-create-group: true
           PortMappings:
             - ContainerPort: !Ref 'ContainerPort'
+      RequiresCompatibilities:
+        - EC2
 
   # The service. The service is a resource which allows you to run multiple
   # copies of a type of task, and gather up their logs and metrics, as well
@@ -96,15 +117,19 @@ Resources:
     Properties:
       ServiceName: !Ref 'ServiceName'
       Cluster: !Ref 'StackName'
+      LaunchType: EC2
       DeploymentConfiguration:
         MaximumPercent: 200
         MinimumHealthyPercent: 75
       DesiredCount: !Ref 'DesiredCount'
       TaskDefinition: !Ref 'TaskDefinition'
+      Role: !Ref 'Role'
       LoadBalancers:
         - ContainerName: !Ref 'ServiceName'
           ContainerPort: !Ref 'ContainerPort'
           TargetGroupArn: !Ref 'TargetGroup'
+        #  LoadBalancerName: !Ref 'LoadBalancer'
+
 
   # A target group. This is used for keeping track of all the tasks, and
   # what IP addresses / port numbers they have. You can query it yourself,
@@ -124,6 +149,8 @@ Resources:
       Name: !Ref 'ServiceName'
       Port: 80
       Protocol: HTTP
+      Targets:
+      - Id: !Ref EC2Instance
       UnhealthyThresholdCount: 2
       VpcId: !Ref 'VpcId'
 
@@ -131,6 +158,7 @@ Resources:
   # worked -
   LoadBalancerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DependsOn: TargetGroup
     Properties:
       Actions:
         - TargetGroupArn: !Ref 'TargetGroup'

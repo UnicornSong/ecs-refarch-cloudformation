@@ -34,7 +34,12 @@ Resources:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: !Ref EnvironmentName
- 
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: deployment-example-log-group
+      
   ECSCloudWatchParameter:
     Type: AWS::SSM::Parameter
     Properties:
