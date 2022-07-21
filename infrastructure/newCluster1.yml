@@ -1,4 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
+# creates everything, but doesnt register the EC2 instance...
+# unable to place a task because no container instance met all of its requirements. Reason: No Container Instances were found in your cluster. For more information, see the Troubleshooting section of the Amazon ECS Developer Guide.
 Parameters:
   SubnetID:
     Type: String
@@ -7,6 +9,7 @@ Parameters:
     Type: String
     Default: 526020827661.dkr.ecr.ap-southeast-2.amazonaws.com/ecs-test-app-private
     Description: The url of a docker image that contains the application process that will handle the traffic for this service  
+    
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: >
@@ -14,10 +17,12 @@ Parameters:
       your container instances. If you specify a VPC ID, you must specify a list of
       existing subnets in that VPC. If you do not specify a VPC ID, a new VPC is created
       with atleast 1 subnet.
+
   EC2Instance:
     Type: String
     Default: "i-0fab8e042ad6ba261"
     Description: The EC2 instance
+
   ContainerPort:
     Type: Number
     Default: 5000
@@ -33,12 +38,18 @@ Parameters:
     Type: String
     Default: "arn:aws:elasticloadbalancing:ap-southeast-2:526020827661:listener/app/dev-ecs-lb/23a3eaf28bdebd16/7cfbf085e46c5066"
     Description: The Arn of the LB Listener 
+
   Priority:
     Type: Number
     Default: 51
     Description: The priority for the routing rule added to the load balancer.
                  This only applies if your have multiple services which have been
-                 assigned to different paths on the load balancer.                            
+                 assigned to different paths on the load balancer.      
+  ServiceRole:
+     Type:    String
+     Default: "arn:aws:iam::526020827661:role/ecsServiceRole"
+     Description: testing this one      
+
 Resources:
   Cluster:
     Type: AWS::ECS::Cluster
@@ -68,9 +79,10 @@ Resources:
       VpcId: !Ref 'VpcId'
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0      
+          FromPort: 5000
+          ToPort: 5000
+          CidrIp: 0.0.0.0/0  
+
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -92,7 +104,7 @@ Resources:
               awslogs-stream-prefix: ecs
       RequiresCompatibilities:
         - EC2
-
+ 
   # A target group. This is used for keeping track of all the tasks, and
   # what IP addresses / port numbers they have. You can query it yourself,
   # to use the addresses yourself, but most often this target group is just
@@ -111,6 +123,7 @@ Resources:
       Name: deployment-example-service-tg
       Port: 80
       Protocol: HTTP
+      TargetType: instance
       Targets:
       - Id: !Ref 'EC2Instance'
         Port: !Ref 'ContainerPort'
@@ -124,7 +137,7 @@ Resources:
     DependsOn: TargetGroup
     Properties:
       Actions:
-        - TargetGroupArn: !Ref TargetGroup
+        - TargetGroupArn: !Ref 'TargetGroup'
           Type: 'forward'
           Order: 10
       Conditions:
@@ -135,13 +148,16 @@ Resources:
 
   Service:
     Type: AWS::ECS::Service
-    DependsOn: TaskDefinition
+    DependsOn: 
+      - TaskDefinition
+      - LoadBalancerRule
     Properties:
       ServiceName: deployment-example-service
       Cluster: !Ref Cluster
       TaskDefinition: !Ref TaskDefinition
       DesiredCount: 1
       LaunchType: EC2
+      Role: !Ref 'ServiceRole'
       LoadBalancers:
         - ContainerName: deployment-example-container
           ContainerPort: !Ref 'ContainerPort'
